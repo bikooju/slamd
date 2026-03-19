@@ -1,0 +1,23 @@
+apiVersion: 1
+
+deleteDatasources:
+  - name: slamd-postgres
+    orgId: 1
+
+datasources:
+  - name: slamd-postgres
+    uid: slamd-postgres
+    type: postgres
+    orgId: 1
+    access: proxy
+    url: postgres:5432
+    database: slamd_metrics
+    user: slamd
+    secureJsonData:
+      password: slamd
+    jsonData:
+      database: slamd_metrics
+      sslmode: disable
+      postgresVersion: 1500
+    isDefault: true
+    editable: true

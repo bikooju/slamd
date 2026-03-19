@@ -1,0 +1,12 @@
+apiVersion: 3
+
+providers:
+  - name: SLAMD
+    orgId: 1
+    folder: SLAMD
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -1,0 +1,431 @@
+{
+  "uid": "slamd-overview",
+  "title": "SLAMD Performance Dashboard",
+  "description": "SLAMD LDAP load test results overview",
+  "tags": ["slamd", "ldap", "performance"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 3,
+  "editable": true,
+  "templating": {
+    "list": [
+      {
+        "name": "op_type",
+        "type": "query",
+        "label": "Operation Type",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT DISTINCT op_type FROM slamd_op_summary ORDER BY op_type",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "allValue": "",
+        "multi": true,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "server_addr",
+        "type": "query",
+        "label": "Server Address",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT DISTINCT split_part(COALESCE(params->'params'->>'Directory Server Address', params->'params'->>'Server Addresses and Ports'), ':', 1) AS addr FROM slamd_job_params WHERE COALESCE(params->'params'->>'Directory Server Address', params->'params'->>'Server Addresses and Ports') IS NOT NULL ORDER BY addr",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "allValue": "",
+        "multi": true,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "job_id",
+        "type": "query",
+        "label": "Job",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT r.job_id AS __value, r.job_description || ' (' || string_agg(DISTINCT s.op_type, ', ' ORDER BY s.op_type) || ') ' || r.job_id AS __text FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id WHERE s.op_type IN (${op_type:singlequote}) GROUP BY r.job_id, r.job_description, r.start_time ORDER BY r.start_time DESC",
+        "current": {},
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2,
+        "sort": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Job Overview",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT r.job_id, r.job_type, r.job_description, r.current_state, to_char(r.start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time, to_char(r.stop_time, 'YYYY-MM-DD HH24:MI:SS') AS stop_time, r.duration_seconds, s.op_type, s.total_count, s.tps, s.avg_latency_ms, s.std_dev, ROUND((s.success_rate * 100)::numeric, 2) AS success_pct, p.params FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id LEFT JOIN slamd_job_params p ON r.job_id = p.job_id WHERE r.start_time >= ($__timeFrom()::timestamptz AT TIME ZONE 'Asia/Seoul') AND r.start_time <= ($__timeTo()::timestamptz AT TIME ZONE 'Asia/Seoul') AND s.op_type IN (${op_type:singlequote}) AND (split_part(COALESCE(p.params->'params'->>'Directory Server Address', p.params->'params'->>'Server Addresses and Ports'), ':', 1) IN (${server_addr:singlequote}) OR p.params IS NULL) ORDER BY r.start_time DESC, s.op_type",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "job_id" },
+            "properties": [
+              { "id": "custom.width", "value": 210 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "tps" },
+            "properties": [
+              { "id": "custom.width", "value": 90 },
+              { "id": "displayName", "value": "TPS" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_latency_ms" },
+            "properties": [
+              { "id": "unit", "value": "ms" },
+              { "id": "displayName", "value": "Avg Latency" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "success_pct" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "displayName", "value": "Success %" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "op_type" },
+            "properties": [
+              { "id": "custom.align", "value": "right" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "start_time" },
+            "properties": [
+              { "id": "displayName", "value": "Start Time" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "stop_time" },
+            "properties": [
+              { "id": "displayName", "value": "Stop Time" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duration_seconds" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "displayName", "value": "Duration" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "params" },
+            "properties": [
+              { "id": "displayName", "value": "Job Parameters" },
+              { "id": "custom.inspect", "value": true },
+              { "id": "custom.width", "value": 150 }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "title": "TPS by Job (Recent 20)",
+      "type": "barchart",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT * FROM (SELECT to_char(r.start_time, 'MM/DD HH24:MI') AS job_label, s.tps, s.total_count, s.avg_latency_ms, s.std_dev, ROUND((s.success_rate * 100)::numeric, 2) AS success_pct, s.op_type, r.job_type, r.job_description, r.current_state, to_char(r.start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time, to_char(r.stop_time, 'YYYY-MM-DD HH24:MI:SS') AS stop_time, r.duration_seconds, r.start_time AS sort_time FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id LEFT JOIN slamd_job_params p ON r.job_id = p.job_id WHERE r.start_time >= ($__timeFrom()::timestamptz AT TIME ZONE 'Asia/Seoul') AND r.start_time <= ($__timeTo()::timestamptz AT TIME ZONE 'Asia/Seoul') AND s.op_type IN (${op_type:singlequote}) AND (split_part(COALESCE(p.params->'params'->>'Directory Server Address', p.params->'params'->>'Server Addresses and Ports'), ':', 1) IN (${server_addr:singlequote}) OR p.params IS NULL) ORDER BY r.start_time DESC LIMIT 20) t ORDER BY t.sort_time ASC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "tps" },
+            "properties": [
+              { "id": "displayName", "value": "TPS" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "op_type" },
+            "properties": [
+              { "id": "displayName", "value": "Operation Type" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "total_count" },
+            "properties": [
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "avg_latency_ms" },
+            "properties": [
+              { "id": "displayName", "value": "Avg Latency (ms)" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "std_dev" },
+            "properties": [
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "success_pct" },
+            "properties": [
+              { "id": "displayName", "value": "Success %" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duration_seconds" },
+            "properties": [
+              { "id": "displayName", "value": "Duration (s)" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sort_time" },
+            "properties": [
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": true, "viz": true } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "auto",
+        "xTickLabelRotation": 0,
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Avg Latency by Job (Recent 20)",
+      "type": "barchart",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT * FROM (SELECT to_char(r.start_time, 'MM/DD HH24:MI') AS job_label, s.avg_latency_ms, s.total_count, s.tps, s.std_dev, ROUND((s.success_rate * 100)::numeric, 2) AS success_pct, s.op_type, r.job_type, r.job_description, r.current_state, to_char(r.start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time, to_char(r.stop_time, 'YYYY-MM-DD HH24:MI:SS') AS stop_time, r.duration_seconds, r.start_time AS sort_time FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id LEFT JOIN slamd_job_params p ON r.job_id = p.job_id WHERE r.start_time >= ($__timeFrom()::timestamptz AT TIME ZONE 'Asia/Seoul') AND r.start_time <= ($__timeTo()::timestamptz AT TIME ZONE 'Asia/Seoul') AND s.op_type IN (${op_type:singlequote}) AND (split_part(COALESCE(p.params->'params'->>'Directory Server Address', p.params->'params'->>'Server Addresses and Ports'), ':', 1) IN (${server_addr:singlequote}) OR p.params IS NULL) ORDER BY r.start_time DESC LIMIT 20) t ORDER BY t.sort_time ASC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "avg_latency_ms" },
+            "properties": [
+              { "id": "displayName", "value": "Avg Latency (ms)" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "op_type" },
+            "properties": [
+              { "id": "displayName", "value": "Operation Type" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "total_count" },
+            "properties": [
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "tps" },
+            "properties": [
+              { "id": "displayName", "value": "TPS" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "std_dev" },
+            "properties": [
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "success_pct" },
+            "properties": [
+              { "id": "displayName", "value": "Success %" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duration_seconds" },
+            "properties": [
+              { "id": "displayName", "value": "Duration (s)" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sort_time" },
+            "properties": [
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": true, "viz": true } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "auto",
+        "xTickLabelRotation": 0,
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Success Rate",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 4, "x": 0, "y": 17 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT ROUND((s.success_rate * 100)::numeric, 2) AS success_pct FROM slamd_op_summary s WHERE s.job_id = '${job_id}' AND s.op_type IN (${op_type:singlequote})",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 5,
+      "title": "Response Time Distribution",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 4, "y": 17 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT b.bucket_name || ' (' || ROUND(SUM(b.count) * 100.0 / NULLIF(SUM(SUM(b.count)) OVER(), 0), 2) || '%)' AS bucket_name, SUM(b.count) AS count FROM slamd_op_bucket b WHERE b.job_id = '${job_id}' AND b.bucket_kind = 'response_time' AND b.op_type IN (${op_type:singlequote}) GROUP BY b.bucket_name ORDER BY CASE b.bucket_name WHEN 'Less Than 1ms' THEN 1 WHEN 'Between 1ms and 2ms' THEN 2 WHEN 'Between 2ms and 3ms' THEN 3 WHEN 'Between 3ms and 4ms' THEN 4 WHEN 'Between 4ms and 5ms' THEN 5 WHEN 'Between 5ms and 10ms' THEN 6 WHEN 'Between 10ms and 20ms' THEN 7 WHEN 'Between 20ms and 30ms' THEN 8 WHEN 'Between 30ms and 50ms' THEN 9 WHEN 'Between 50ms and 100ms' THEN 10 WHEN 'Between 100ms and 1000ms' THEN 11 WHEN '1s or More' THEN 12 ELSE 999 END",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": ["value", "percent"]
+        },
+        "pieType": "donut",
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Response Time Histogram",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 17 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT b.bucket_name, SUM(b.count) AS count FROM slamd_op_bucket b WHERE b.job_id = '${job_id}' AND b.bucket_kind = 'response_time' AND b.op_type IN (${op_type:singlequote}) GROUP BY b.bucket_name ORDER BY CASE b.bucket_name WHEN 'Less Than 1ms' THEN 1 WHEN 'Between 1ms and 2ms' THEN 2 WHEN 'Between 2ms and 3ms' THEN 3 WHEN 'Between 3ms and 4ms' THEN 4 WHEN 'Between 4ms and 5ms' THEN 5 WHEN 'Between 5ms and 10ms' THEN 6 WHEN 'Between 10ms and 20ms' THEN 7 WHEN 'Between 20ms and 30ms' THEN 8 WHEN 'Between 30ms and 50ms' THEN 9 WHEN 'Between 50ms and 100ms' THEN 10 WHEN 'Between 100ms and 1000ms' THEN 11 WHEN '1s or More' THEN 12 ELSE 999 END",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "values": true,
+          "calcs": ["lastNotNull"],
+          "fields": "/^count$/"
+        },
+        "showUnfilled": true,
+        "text": {}
+      }
+    },
+    {
+      "id": 7,
+      "title": "Result Codes Distribution",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 17 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT b.bucket_name, SUM(b.count) AS count FROM slamd_op_bucket b WHERE b.job_id = '${job_id}' AND b.bucket_kind = 'result_code' AND b.op_type IN (${op_type:singlequote}) GROUP BY b.bucket_name ORDER BY SUM(b.count) DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "values": true,
+          "calcs": ["lastNotNull"],
+          "fields": ""
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": ["value", "percent"]
+        },
+        "pieType": "donut",
+        "tooltip": { "mode": "single" }
+      }
+    }
+  ],
+  "time": { "from": "now-30d", "to": "now" },
+  "refresh": "",
+  "annotations": { "list": [] }
+}

@@ -1,0 +1,240 @@
+{
+  "uid": "slamd-comparison",
+  "title": "SLAMD Product Comparison",
+  "description": "Compare LDAP server performance across products with identical test conditions",
+  "tags": ["slamd", "ldap", "comparison"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "templating": {
+    "list": [
+      {
+        "name": "op_type",
+        "type": "query",
+        "label": "Op Type",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT DISTINCT op_type FROM slamd_op_summary ORDER BY op_type",
+        "current": {},
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "thread_count",
+        "type": "query",
+        "label": "Thread Count",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT DISTINCT thread_count FROM slamd_run WHERE thread_count IS NOT NULL ORDER BY thread_count",
+        "current": {},
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2,
+        "sort": 3
+      },
+      {
+        "name": "y_scale",
+        "type": "custom",
+        "label": "Y축",
+        "query": "상세,전체",
+        "current": { "text": "상세", "value": "상세" },
+        "includeAll": false,
+        "multi": false
+      },
+      {
+        "name": "product",
+        "type": "query",
+        "label": "Product",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT DISTINCT product_name FROM slamd_run WHERE product_name IS NOT NULL ORDER BY product_name",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Performance Trend (op/sec over time)",
+      "type": "trend",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT seconds, product_name, ops FROM (SELECT (n.ord - 1) * i.collection_interval AS seconds, r.product_name, ROUND(n.ops::numeric) AS ops FROM slamd_op_interval i JOIN slamd_run r ON i.job_id = r.job_id, unnest(i.ops_per_sec) WITH ORDINALITY AS n(ops, ord) WHERE i.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) UNION ALL SELECT 0, '__base__', 0 WHERE '${y_scale}' = '전체') t ORDER BY product_name, seconds",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "pointSize": 6,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "showPoints": "always",
+            "spanNulls": false,
+            "axisLabel": "ops/sec"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "__base__" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "transparent" } },
+              { "id": "custom.lineWidth", "value": 0 },
+              { "id": "custom.pointSize", "value": 0 },
+              { "id": "custom.showPoints", "value": "never" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": true, "viz": false } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": ["product_name"],
+            "keepFields": false
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "seconds",
+            "mode": "outer"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^seconds.*$",
+            "renamePattern": "경과시간(초)"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^ops (.*)$",
+            "renamePattern": "$1"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Summary Comparison",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT r.product_name AS \"Product\", r.thread_count AS \"Threads\", r.job_id AS \"Job ID\", ROUND(s.tps::numeric, 2) AS \"Avg TPS\", ROUND(s.avg_latency_ms::numeric, 3) AS \"Avg Latency (ms)\", s.total_count AS \"Total Count\", ROUND((s.success_rate * 100)::numeric, 2) AS \"Success %\", r.duration_seconds AS \"Duration (s)\" FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) ORDER BY r.product_name",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "filterable": true }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Avg Latency (ms)" },
+            "properties": [
+              { "id": "unit", "value": "ms" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Success %" },
+            "properties": [
+              { "id": "unit", "value": "percent" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "TPS Comparison by Product",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT r.product_name AS \"Product\", ROUND(s.tps::numeric, 2) AS \"TPS\", s.op_type, r.job_type, r.job_description, r.current_state, to_char(r.start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time, to_char(r.stop_time, 'YYYY-MM-DD HH24:MI:SS') AS stop_time, r.duration_seconds FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) ORDER BY r.product_name",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "op_type" },
+            "properties": [
+              { "id": "displayName", "value": "Operation Type" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "job_type" },
+            "properties": [
+              { "id": "displayName", "value": "Job Type" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "job_description" },
+            "properties": [
+              { "id": "displayName", "value": "Job Description" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "start_time" },
+            "properties": [
+              { "id": "displayName", "value": "Start Time" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "stop_time" },
+            "properties": [
+              { "id": "displayName", "value": "Stop Time" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "duration_seconds" },
+            "properties": [
+              { "id": "displayName", "value": "Duration (s)" },
+              { "id": "custom.hideFrom", "value": { "legend": true, "tooltip": false, "viz": true } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "vertical",
+        "showValue": "always",
+        "xTickLabelRotation": 0,
+        "tooltip": { "mode": "single", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    }
+  ],
+  "time": { "from": "now-30d", "to": "now" },
+  "refresh": "",
+  "annotations": { "list": [] }
+}
