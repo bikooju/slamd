@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: slamd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: slamd_metrics
+      POSTGRES_USER: slamd
+      POSTGRES_PASSWORD: slamd
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  grafana:
+    image: grafana/grafana
+    container_name: slamd-grafana
+    restart: unless-stopped
+    ports:
+      - "30000:3000"
+    depends_on:
+      - postgres
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+
+volumes:
+  postgres_data:
+  grafana_data:

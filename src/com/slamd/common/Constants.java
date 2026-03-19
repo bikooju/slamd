@@ -4249,6 +4249,14 @@ public final class Constants
 
 
   /**
+   * The name of the administrative subsection that allows the user to export
+   * summary statistics for a job as a CSV file.
+   */
+  public static final String SERVLET_SECTION_JOB_EXPORT_CSV = "export_csv";
+
+
+
+  /**
    * The name of the administrative subsection that allows the user to view
    * graphs of the statistical information stored for a job that has completed
    * processing.
@@ -6539,7 +6547,7 @@ public final class Constants
       }
       else if ((c < 32) || (c > 126))
       {
-        buffer.append("<!-- " + c + " -->");
+        buffer.append("&#" + (int) c + ";");
       }
       else
       {
@@ -6548,6 +6556,76 @@ public final class Constants
     }
 
     return buffer.toString();
+  }
+
+
+
+  /**
+   * Decodes HTML numeric character references (e.g. {@code &#47700;}) and
+   * common HTML named entities in the given string.
+   *
+   * @param  s  The string to decode.
+   *
+   * @return  The decoded string, or {@code null} if the input is {@code null}.
+   */
+  public static String decodeHtmlEntities(String s)
+  {
+    if (s == null)
+    {
+      return null;
+    }
+
+    if (s.contains("&#"))
+    {
+      StringBuilder sb = new StringBuilder(s.length());
+      int i = 0;
+      while (i < s.length())
+      {
+        if (s.charAt(i) == '&' && (i + 2) < s.length() &&
+            s.charAt(i + 1) == '#')
+        {
+          int semi = s.indexOf(';', i + 2);
+          if (semi > 0 && semi - i <= 8)
+          {
+            String numStr = s.substring(i + 2, semi);
+            try
+            {
+              int codePoint;
+              if (numStr.length() > 0 &&
+                  (numStr.charAt(0) == 'x' || numStr.charAt(0) == 'X'))
+              {
+                codePoint = Integer.parseInt(numStr.substring(1), 16);
+              }
+              else
+              {
+                codePoint = Integer.parseInt(numStr);
+              }
+              sb.appendCodePoint(codePoint);
+              i = semi + 1;
+              continue;
+            }
+            catch (NumberFormatException ignored)
+            {
+            }
+          }
+        }
+        sb.append(s.charAt(i));
+        i++;
+      }
+      s = sb.toString();
+    }
+
+    if (s.contains("&"))
+    {
+      s = s.replace("&amp;", "&");
+      s = s.replace("&lt;", "<");
+      s = s.replace("&gt;", ">");
+      s = s.replace("&quot;", "\"");
+      s = s.replace("&apos;", "'");
+      s = s.replace("&nbsp;", " ");
+    }
+
+    return s;
   }
 
 

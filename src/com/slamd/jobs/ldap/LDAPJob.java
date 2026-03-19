@@ -136,6 +136,11 @@ public abstract class LDAPJob
                 "server.  If no value is provided then no authentication " +
                 "will be performed.",
                 false, "");
+  private StringParameter productNameParameter =
+          new StringParameter("product_name", "Product Name",
+                  "The name of the product being tested (e.g., UDS, SUN). " +
+                  "Used for comparison dashboards in Grafana.",
+                  false, "");
 
 
 
@@ -169,10 +174,12 @@ public abstract class LDAPJob
     ArrayList<Parameter> params = new ArrayList<>();
 
     params.add(new PlaceholderParameter());
+    params.add(productNameParameter);
     params.add(addressesParameter);
     params.add(securityMethodParameter);
     params.add(bindDNParameter);
     params.add(bindPWParameter);
+
 
     List<Parameter> nonLDAPStubs = getNonLDAPParameterStubs();
     if (nonLDAPStubs != null)

@@ -218,6 +218,8 @@ public final class AddAndDeleteRateJob
   private IncrementalTracker addsExceedingThreshold;
   private IncrementalTracker deletesCompleted;
   private IncrementalTracker deletesExceedingThreshold;
+  private ResponseTimeCategorizer addResponseTimeCategorizer;
+  private ResponseTimeCategorizer deleteResponseTimeCategorizer;
   private TimeTracker        addTimer;
   private TimeTracker        deleteTimer;
 
@@ -421,6 +423,9 @@ public final class AddAndDeleteRateJob
                       collectionInterval),
       new CategoricalTracker(clientID, threadID, STAT_ADD_RESULT_CODES,
                              collectionInterval),
+      ResponseTimeCategorizer.getStatTrackerStub(
+           "Add Response Time Categories", clientID, threadID,
+           collectionInterval),
       new IncrementalTracker(clientID, threadID, STAT_ADDS_EXCEEDING_THRESHOLD,
                              collectionInterval),
       new IncrementalTracker(clientID, threadID, STAT_DELETES_COMPLETED,
@@ -429,6 +434,9 @@ public final class AddAndDeleteRateJob
                       collectionInterval),
       new CategoricalTracker(clientID, threadID, STAT_DELETE_RESULT_CODES,
                              collectionInterval),
+      ResponseTimeCategorizer.getStatTrackerStub(
+           "Delete Response Time Categories", clientID, threadID,
+           collectionInterval),
       new IncrementalTracker(clientID, threadID,
                              STAT_DELETES_EXCEEDING_THRESHOLD,
                              collectionInterval)
@@ -443,12 +451,13 @@ public final class AddAndDeleteRateJob
   @Override()
   public StatTracker[] getStatTrackers()
   {
-    ArrayList<StatTracker> statList = new ArrayList<>(8);
+    ArrayList<StatTracker> statList = new ArrayList<>(10);
     if (performAdds)
     {
       statList.add(addsCompleted);
       statList.add(addTimer);
       statList.add(addResultCodes);
+      statList.add(addResponseTimeCategorizer.getStatTracker());
 
       if (responseTimeThreshold > 0)
       {
@@ -461,6 +470,7 @@ public final class AddAndDeleteRateJob
       statList.add(deletesCompleted);
       statList.add(deleteTimer);
       statList.add(deleteResultCodes);
+      statList.add(deleteResponseTimeCategorizer.getStatTracker());
 
       if (responseTimeThreshold > 0)
       {
@@ -715,6 +725,9 @@ public final class AddAndDeleteRateJob
          collectionInterval);
     addResultCodes = new CategoricalTracker(clientID, threadID,
          STAT_ADD_RESULT_CODES, collectionInterval);
+    addResponseTimeCategorizer = new ResponseTimeCategorizer(
+         "Add Response Time Categories", clientID, threadID,
+         collectionInterval);
     addsExceedingThreshold = new IncrementalTracker(clientID, threadID,
          STAT_ADDS_EXCEEDING_THRESHOLD, collectionInterval);
     deletesCompleted = new IncrementalTracker(clientID, threadID,
@@ -723,6 +736,9 @@ public final class AddAndDeleteRateJob
          collectionInterval);
     deleteResultCodes = new CategoricalTracker(clientID, threadID,
          STAT_DELETE_RESULT_CODES, collectionInterval);
+    deleteResponseTimeCategorizer = new ResponseTimeCategorizer(
+         "Delete Response Time Categories", clientID, threadID,
+         collectionInterval);
     deletesExceedingThreshold = new IncrementalTracker(clientID, threadID,
          STAT_DELETES_EXCEEDING_THRESHOLD, collectionInterval);
 
@@ -776,6 +792,12 @@ public final class AddAndDeleteRateJob
   {
     StringBuilder dnBuffer = new StringBuilder();
 
+    logMessage("DEBUG runJob: performAdds=" + performAdds +
+        ", performDeletes=" + performDeletes +
+        ", firstEntryNumber=" + firstEntryNumber +
+        ", lastEntryNumber=" + lastEntryNumber +
+        ", entryNumber=" + entryNumber.get() +
+        ", shouldStop=" + shouldStop());
 
     // Start collecting the appropriate set of statistics.
     if (performAdds)
@@ -783,6 +805,7 @@ public final class AddAndDeleteRateJob
       addsCompleted.startTracker();
       addTimer.startTracker();
       addResultCodes.startTracker();
+      addResponseTimeCategorizer.startStatTracker();
       addsExceedingThreshold.startTracker();
     }
 
@@ -791,12 +814,14 @@ public final class AddAndDeleteRateJob
       deletesCompleted.startTracker();
       deleteTimer.startTracker();
       deleteResultCodes.startTracker();
+      deleteResponseTimeCategorizer.startStatTracker();
       deletesExceedingThreshold.startTracker();
     }
 
 
     if (performAdds)
     {
+      logMessage("DEBUG entering add loop, shouldStop=" + shouldStop());
       while (! shouldStop())
       {
         if (rateLimiter != null)
@@ -833,6 +858,7 @@ public final class AddAndDeleteRateJob
 
 
         addTimer.startTimer();
+        final long beforeAddNanos = System.nanoTime();
 
         try
         {
@@ -846,6 +872,8 @@ public final class AddAndDeleteRateJob
         finally
         {
           addTimer.stopTimer();
+          addResponseTimeCategorizer.categorizeResponseTime(
+               beforeAddNanos, System.nanoTime());
           addsCompleted.increment();
 
           if ((responseTimeThreshold > 0) &&
@@ -877,6 +905,7 @@ public final class AddAndDeleteRateJob
 
           long deleteStartTime = System.currentTimeMillis();
           deleteTimer.startTimer();
+          final long beforeDeleteNanos1 = System.nanoTime();
           try
           {
             LDAPResult deleteResult = conn.delete(entry.getDN());
@@ -890,6 +919,8 @@ public final class AddAndDeleteRateJob
           finally
           {
             deleteTimer.stopTimer();
+            deleteResponseTimeCategorizer.categorizeResponseTime(
+                 beforeDeleteNanos1, System.nanoTime());
             deletesCompleted.increment();
 
             if ((responseTimeThreshold > 0) &&
@@ -920,6 +951,7 @@ public final class AddAndDeleteRateJob
       addsCompleted.stopTracker();
       addTimer.stopTracker();
       addResultCodes.stopTracker();
+      addResponseTimeCategorizer.stopStatTracker();
       addsExceedingThreshold.stopTracker();
 
       if (alternateAddsAndDeletes)
@@ -927,6 +959,7 @@ public final class AddAndDeleteRateJob
         deletesCompleted.stopTracker();
         deleteTimer.stopTracker();
         deleteResultCodes.stopTracker();
+        deleteResponseTimeCategorizer.stopStatTracker();
         deletesExceedingThreshold.stopTracker();
       }
     }
@@ -969,6 +1002,7 @@ public final class AddAndDeleteRateJob
       deletesCompleted.startTracker();
       deleteTimer.startTracker();
       deleteResultCodes.startTracker();
+      deleteResponseTimeCategorizer.startStatTracker();
       deletesExceedingThreshold.startTracker();
 
       while (! shouldStop())
@@ -995,6 +1029,7 @@ public final class AddAndDeleteRateJob
         dnBuffer.append(',');
         dnBuffer.append(baseDN);
         deleteTimer.startTimer();
+        final long beforeDeleteNanos2 = System.nanoTime();
 
         try
         {
@@ -1008,6 +1043,8 @@ public final class AddAndDeleteRateJob
         finally
         {
           deleteTimer.stopTimer();
+          deleteResponseTimeCategorizer.categorizeResponseTime(
+               beforeDeleteNanos2, System.nanoTime());
           deletesCompleted.increment();
 
           if ((responseTimeThreshold > 0) &&
@@ -1034,6 +1071,7 @@ public final class AddAndDeleteRateJob
       deletesCompleted.stopTracker();
       deleteTimer.stopTracker();
       deleteResultCodes.stopTracker();
+      deleteResponseTimeCategorizer.stopStatTracker();
       deletesExceedingThreshold.stopTracker();
     }
   }

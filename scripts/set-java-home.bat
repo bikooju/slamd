@@ -16,7 +16,7 @@ rem ###########################################################################
 
 
 rem Specify the path to the Java installation to use for the SLAMD client.
-set JAVA_HOME=c:\java
+set JAVA_HOME=C:\Users\dsm\Desktop\util\jdk-17.0.12_windows-x64_bin\jdk-17.0.12
 
 
 rem

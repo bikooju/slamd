@@ -438,7 +438,7 @@ public final class DynamicConstants
     <checkstyle config="${checkstyle.dir}/slamd-checkstyle.xml"
                 classpath="${classes.dir}" failOnViolation="true">
       <fileset dir="${source.dir}" includes="**/*.java"
-               excludes="**/Version.java" />
+               excludes="**/Version.java,**/DynamicConstants.java" />
       <formatter type="plain" />
     </checkstyle>
   </target>

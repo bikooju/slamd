@@ -117,6 +117,13 @@ public final class BasicSearchAndBindRateJob
 
 
 
+  // The parameter used to specify the product name for comparison.
+  private StringParameter productNameParameter = new StringParameter(
+       "product_name", "Product Name",
+       "The name of the product being tested (e.g., UDS, SUN). " +
+       "Used for comparison dashboards in Grafana.",
+       false, "");
+
   // The parameter used to provide a label for the connection details.
   private LabelParameter connectionLabelParameter = new LabelParameter(
        "Connection Parameters");
@@ -405,6 +412,7 @@ public final class BasicSearchAndBindRateJob
     final Parameter[] parameters =
     {
       new PlaceholderParameter(),
+      productNameParameter,
       connectionLabelParameter,
       serverAddressParameter,
       serverPortParameter,

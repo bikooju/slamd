@@ -415,7 +415,8 @@ public abstract class Parameter
    */
   public String getHTMLDisplayValue()
   {
-    return Constants.makeHTMLSafe(getDisplayValue());
+    return Constants.makeHTMLSafe(
+        Constants.decodeHtmlEntities(getDisplayValue()));
   }
 
 

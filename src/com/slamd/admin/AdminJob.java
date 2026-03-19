@@ -20,8 +20,11 @@ package com.slamd.admin;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.InetAddress;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
@@ -64,6 +67,7 @@ import com.slamd.server.RealTimeJobStats;
 import com.slamd.server.ResourceMonitorClientConnection;
 import com.slamd.server.SLAMDServerException;
 import com.slamd.server.UploadedFile;
+import com.slamd.stat.CategoricalTracker;
 import com.slamd.stat.ResourceMonitorStatTracker;
 import com.slamd.stat.StatEncoder;
 import com.slamd.stat.StatGrapher;
@@ -73,6 +77,7 @@ import static com.unboundid.util.StaticUtils.secondsToHumanReadableDuration;
 
 import static com.slamd.admin.AdminServlet.*;
 import static com.slamd.admin.AdminUI.*;
+import java.util.UUID;
 
 
 
@@ -2468,6 +2473,10 @@ public final class AdminJob
           nameList.add("Save Statistics");
           targetList.add(" TARGET=\"_BLANK\"");
 
+          subsectionList.add(Constants.SERVLET_SECTION_JOB_EXPORT_CSV);
+          nameList.add("Export Summary CSV");
+          targetList.add(" TARGET=\"_BLANK\"");
+
           htmlBody.append("  <TR>" + EOL);
           htmlBody.append("    <TD COLSPAN=\"3\">" + EOL);
           htmlBody.append("      <TABLE BORDER=\"0\">" + EOL);
@@ -3880,6 +3889,406 @@ public final class AdminJob
         }
       }
     }
+  }
+
+
+
+  /**
+   * Exports the summary statistics shown on the View Job page as a CSV file.
+   * Unlike handleSaveJobStatistics which exports detailed per-interval data,
+   * this method exports only the summary table (Count, Avg/Second, etc.).
+   *
+   * @param  requestInfo  The state information for this request.
+   */
+  static void handleExportSummaryCSV(RequestInfo requestInfo)
+  {
+    logMessage(requestInfo, "In handleExportSummaryCSV()");
+
+    // Check export permission.
+    if (! requestInfo.mayExportJobData)
+    {
+      logMessage(requestInfo, "No mayExportJobData permission granted");
+      generateAccessDeniedBody(requestInfo, "You do not have permission to " +
+                               "export job information");
+      return;
+    }
+
+
+    // Get state variables from the request.
+    HttpServletRequest  request     = requestInfo.request;
+    HttpServletResponse response    = requestInfo.response;
+    StringBuilder       htmlBody    = requestInfo.htmlBody;
+    StringBuilder       infoMessage = requestInfo.infoMessage;
+
+
+    // Get the job ID. Show error if missing.
+    String jobID = request.getParameter(Constants.SERVLET_PARAM_JOB_ID);
+    if ((jobID == null) || (jobID.length() == 0))
+    {
+      htmlBody.append("<SPAN CLASS=\"" + Constants.STYLE_MAIN_HEADER +
+                      "\">Export Summary CSV</SPAN>" + EOL);
+      htmlBody.append("<BR><BR>" + EOL);
+      htmlBody.append("No job was specified for which to export summary " +
+                      "statistics." + EOL);
+      String link = generateLink(requestInfo, Constants.SERVLET_SECTION_JOB,
+                                 Constants.SERVLET_SECTION_JOB_VIEW_COMPLETED,
+                                 "here");
+      htmlBody.append("Click " + link + " to view the set of completed " +
+                      "jobs" + EOL);
+      return;
+    }
+
+
+    // Retrieve the job from DB. Show error if not found.
+    Job job = null;
+    try
+    {
+      job = configDB.getJob(jobID);
+      if (job == null)
+      {
+        throw new SLAMDServerException("Could not retrieve information for " +
+                                       "job from the configuration directory");
+      }
+    }
+    catch (Exception e)
+    {
+      infoMessage.append("ERROR:  " + e.getMessage() + "<BR>" + EOL);
+      htmlBody.append("<SPAN CLASS=\"" + Constants.STYLE_MAIN_HEADER +
+                      "\">Export Summary CSV</SPAN>" + EOL);
+      htmlBody.append("<BR><BR>" + EOL);
+      htmlBody.append("Information about job " + jobID +
+                      " is not available." + EOL);
+      htmlBody.append("See the error message above for more information." +
+                      EOL);
+      return;
+    }
+
+
+    // Build the CSV content in memory first, then write it to both the
+    // HTTP response (browser download) and a server-side file.
+    StringWriter csvBuffer = new StringWriter();
+    PrintWriter writer = new PrintWriter(csvBuffer);
+
+
+    // Write the [General Information] section.
+    writer.println("[General Information]");
+    writer.println("Job ID," + jobID);
+
+    String description = job.getJobDescription();
+    if (description != null)
+    {
+      writer.println("Job Description," + escapeCSV(description));
+    }
+
+    writer.println("Job Type," + escapeCSV(job.getJobName()));
+    writer.println("Job Class," + job.getJobClassName());
+    writer.println("Current State," + escapeCSV(job.getJobStateString()));
+
+    Date actualStartTime = job.getActualStartTime();
+    if (actualStartTime != null)
+    {
+      writer.println("Actual Start Time," +
+                     displayDateFormat.format(actualStartTime));
+    }
+
+    Date actualStopTime = job.getActualStopTime();
+    if (actualStopTime != null)
+    {
+      writer.println("Actual Stop Time," +
+                     displayDateFormat.format(actualStopTime));
+    }
+
+    int actualDuration = job.getActualDuration();
+    if (actualDuration > 0)
+    {
+      writer.println("Actual Duration," +
+                     secondsToHumanReadableDuration(actualDuration));
+    }
+
+
+    // Write stat tracker sections (e.g. Adds Completed, Add Duration).
+    // Uses the same API as the View Job page (getSummaryLabels/getSummaryData).
+    if (job.hasStats())
+    {
+      String[] trackerNames = job.getStatTrackerNames();
+      for (int i = 0; i < trackerNames.length; i++)
+      {
+        StatTracker[] statTrackers = job.getStatTrackers(trackerNames[i]);
+        if (statTrackers.length > 0)
+        {
+          try
+          {
+            // Aggregate data from all clients/threads into one.
+            StatTracker tracker = statTrackers[0].newInstance();
+            tracker.aggregate(statTrackers);
+
+            writer.println();
+            writer.println("[" + trackerNames[i] + "]");
+
+            if (tracker instanceof CategoricalTracker)
+            {
+              // Write each category as an individual row, sorted by
+              // count descending (matching the web UI order).
+              CategoricalTracker catTracker = (CategoricalTracker) tracker;
+              writer.println("bucket_name,count,percent");
+
+              String[] catNames = catTracker.getCategoryNames();
+              int[]    catCounts = catTracker.getTotalCounts();
+              int      catTotal = catTracker.getTotalCount();
+
+              // Build index array and sort by count descending.
+              Integer[] indices = new Integer[catNames.length];
+              for (int j = 0; j < indices.length; j++)
+              {
+                indices[j] = j;
+              }
+              java.util.Arrays.sort(indices,
+                  (a, b) -> Integer.compare(catCounts[b], catCounts[a]));
+
+              for (int idx : indices)
+              {
+                double pct = (catTotal > 0)
+                    ? (100.0 * catCounts[idx] / catTotal) : 0.0;
+                writer.println(escapeCSV(catNames[idx]) + "," +
+                               catCounts[idx] + "," +
+                               decimalFormat.format(pct));
+              }
+            }
+            else
+            {
+              // Write summary header row (e.g. Count,Avg/Second,...).
+              String[] labels = tracker.getSummaryLabels();
+              StringBuilder labelLine = new StringBuilder();
+              for (int j = 0; j < labels.length; j++)
+              {
+                if (j > 0)
+                {
+                  labelLine.append(',');
+                }
+                labelLine.append(escapeCSV(labels[j]));
+              }
+              writer.println(labelLine.toString());
+
+              // Write summary data row (e.g. 319427,1252.655,...).
+              String[] data = tracker.getSummaryData();
+              StringBuilder dataLine = new StringBuilder();
+              for (int j = 0; j < data.length; j++)
+              {
+                if (j > 0)
+                {
+                  dataLine.append(',');
+                }
+                dataLine.append(escapeCSV(data[j]));
+              }
+              writer.println(dataLine.toString());
+            }
+          }
+          catch (Exception e)
+          {
+            e.printStackTrace();
+          }
+        }
+      }
+    }
+
+
+    // Write resource monitor stat tracker sections (if any).
+    if (job.hasResourceStats())
+    {
+      String[] trackerNames = job.getResourceStatTrackerNames();
+      for (int i = 0; i < trackerNames.length; i++)
+      {
+        StatTracker[] statTrackers =
+             job.getResourceStatTrackers(trackerNames[i]);
+        if (statTrackers.length > 0)
+        {
+          try
+          {
+            StatTracker tracker = statTrackers[0].newInstance();
+            tracker.aggregate(statTrackers);
+
+            writer.println();
+            writer.println("[" + trackerNames[i] + "]");
+
+            if (tracker instanceof CategoricalTracker)
+            {
+              CategoricalTracker catTracker = (CategoricalTracker) tracker;
+              writer.println("bucket_name,count,percent");
+
+              String[] catNames = catTracker.getCategoryNames();
+              int[]    catCounts = catTracker.getTotalCounts();
+              int      catTotal = catTracker.getTotalCount();
+
+              Integer[] indices = new Integer[catNames.length];
+              for (int j = 0; j < indices.length; j++)
+              {
+                indices[j] = j;
+              }
+              java.util.Arrays.sort(indices,
+                  (a, b) -> Integer.compare(catCounts[b], catCounts[a]));
+
+              for (int idx : indices)
+              {
+                double pct = (catTotal > 0)
+                    ? (100.0 * catCounts[idx] / catTotal) : 0.0;
+                writer.println(escapeCSV(catNames[idx]) + "," +
+                               catCounts[idx] + "," +
+                               decimalFormat.format(pct));
+              }
+            }
+            else
+            {
+              String[] labels = tracker.getSummaryLabels();
+              StringBuilder labelLine = new StringBuilder();
+              for (int j = 0; j < labels.length; j++)
+              {
+                if (j > 0)
+                {
+                  labelLine.append(',');
+                }
+                labelLine.append(escapeCSV(labels[j]));
+              }
+              writer.println(labelLine.toString());
+
+              String[] data = tracker.getSummaryData();
+              StringBuilder dataLine = new StringBuilder();
+              for (int j = 0; j < data.length; j++)
+              {
+                if (j > 0)
+                {
+                  dataLine.append(',');
+                }
+                dataLine.append(escapeCSV(data[j]));
+              }
+              writer.println(dataLine.toString());
+            }
+          }
+          catch (Exception e)
+          {
+            e.printStackTrace();
+          }
+        }
+      }
+    }
+
+    writer.flush();
+    String csvContent = csvBuffer.toString();
+
+
+    // Save the CSV to a server-side file in the project's csv directory.
+    // Walk up from WEB-INF to find the project root (contains build.xml).
+    try
+    {
+      File projectRoot = null;
+      File dir = new File(webInfBasePath);
+      for (int level = 0; level < 10; level++)
+      {
+        dir = dir.getParentFile();
+        if (dir == null)
+        {
+          break;
+        }
+        if (new File(dir, "build.xml").exists())
+        {
+          projectRoot = dir;
+          break;
+        }
+      }
+
+      if (projectRoot == null)
+      {
+        projectRoot = new File(webInfBasePath).getParentFile()
+                          .getParentFile().getParentFile();
+      }
+
+      File csvDir = new File(projectRoot, "csv");
+      if (! csvDir.exists())
+      {
+        csvDir.mkdirs();
+      }
+
+      File csvFile = new File(csvDir,
+                              "slamd_summary_" + jobID + ".csv");
+      try (OutputStreamWriter fileWriter =
+               new OutputStreamWriter(
+                   new FileOutputStream(csvFile), "UTF-8"))
+      {
+        fileWriter.write('\uFEFF');
+        fileWriter.write(csvContent);
+        fileWriter.flush();
+      }
+
+      slamdServer.logMessage(Constants.LOG_LEVEL_CLIENT_DEBUG,
+          "CSV saved to server: " + csvFile.getAbsolutePath());
+    }
+    catch (Exception e)
+    {
+      slamdServer.logMessage(Constants.LOG_LEVEL_EXCEPTION_DEBUG,
+          "Failed to save CSV to server-side file: " + e.getMessage());
+    }
+
+    MetricsExporter.export(job);
+
+
+    // Send the CSV as a browser download via the HTTP response.
+    response.setContentType("text/csv; charset=UTF-8");
+    response.setCharacterEncoding("UTF-8");
+    response.addHeader("Content-Disposition",
+                       "attachment; filename=\"slamd_summary_" + jobID +
+                       ".csv\"");
+    requestInfo.generateHTML = false;
+
+    PrintWriter responseWriter;
+    try
+    {
+      responseWriter = response.getWriter();
+    }
+    catch (IOException ioe)
+    {
+      infoMessage.append("ERROR:  Unable to write the data -- " + ioe +
+                         "<BR>" + EOL);
+      htmlBody.append("<SPAN CLASS=\"" + Constants.STYLE_MAIN_HEADER +
+                      "\">Error Exporting Data</SPAN>" + EOL);
+      htmlBody.append("<BR><BR>" + EOL);
+      htmlBody.append("The attempt to export the data failed." + EOL);
+      htmlBody.append("See the error message above for additional " +
+                      "information");
+      return;
+    }
+
+    responseWriter.print('\uFEFF');
+    responseWriter.print(csvContent);
+    responseWriter.flush();
+  }
+
+
+
+  /**
+   * Escapes a value for safe inclusion in a CSV field.  If the value contains
+   * a comma, double quote, or newline, it will be wrapped in double quotes
+   * with any internal double quotes doubled (RFC 4180).
+   * Also decodes HTML numeric character references (e.g. &#44160;) and
+   * common HTML entities (e.g. &amp;) before escaping.
+   *
+   * @param  value  The value to escape.
+   *
+   * @return  The escaped CSV value.
+   */
+  private static String escapeCSV(String value)
+  {
+    if (value == null)
+    {
+      return "";
+    }
+
+    value = Constants.decodeHtmlEntities(value);
+
+    if (value.contains(",") || value.contains("\"") || value.contains("\n"))
+    {
+      return '"' + value.replace("\"", "\"\"") + '"';
+    }
+
+    return value;
   }
 
 
@@ -7722,6 +8131,98 @@ public final class AdminJob
                     "COLS=\"80\">" + comments + "</TEXTAREA></TD>" + EOL);
     htmlBody.append("  </TR>" + EOL);
 
+    // Product Comparision section (LDAP jobs only)
+    if ("LDAP".equals(jobClass.getJobCategoryName()))
+    {
+      htmlBody.append("  <TR>" + EOL);
+      htmlBody.append("    <TD COLSPAN=\"3\"><B>Product Comparison</B></TD>" +
+              EOL);
+      htmlBody.append("  </TR>" + EOL);
+
+      htmlBody.append("  <TR>" + EOL);
+      htmlBody.append("    <TD><A CLASS=\"" + Constants.STYLE_FORM_CAPTION +
+              "\" TITLE=\"Enable comparison mode to test multiple " +
+              "servers with identical parameters.\">Enable Product " +
+              "Comparison</A></TD>" + EOL);
+      htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+      htmlBody.append("    <TD><INPUT TYPE=\"CHECKBOX\" NAME=\"" +
+              "comparison_enabled\" VALUE=\"true\" " +
+              "ONCLICK=\"var s=document.getElementById('comp_servers');" +
+              "s.style.display=this.checked?'':'none';\">" +
+              "</TD>" + EOL);
+      htmlBody.append("  </TR>" + EOL);
+
+      htmlBody.append("</TABLE>" + EOL);
+      htmlBody.append("<TABLE BORDER=\"0\" WIDTH=\"100%\"" +
+              " ID=\"comp_servers\"" +
+              " STYLE=\"display:none\">" + EOL);
+
+      for (int cs = 2; cs <= 4; cs++)
+      {
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD COLSPAN=\"3\"><I>Comparison Server " + cs +
+                (cs > 2 ? " (Optional)" : "") + "</I></TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD><A CLASS=\"" + Constants.STYLE_FORM_CAPTION +
+                "\">Product Name</A></TD>" + EOL);
+        htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+        htmlBody.append("    <TD><INPUT TYPE=\"TEXT\" NAME=\"comp_product_" +
+                cs + "\" SIZE=\"80\"></TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD><A CLASS=\"" +
+                Constants.STYLE_FORM_CAPTION +
+                "\">Server Address</A></TD>" + EOL);
+        htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+        htmlBody.append("    <TD><INPUT TYPE=\"TEXT\"" +
+                " NAME=\"comp_address_" + cs +
+                "\" SIZE=\"80\"></TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD><A CLASS=\"" +
+                Constants.STYLE_FORM_CAPTION +
+                "\">Server Port</A></TD>" + EOL);
+        htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+        htmlBody.append("    <TD><INPUT TYPE=\"TEXT\"" +
+                " NAME=\"comp_port_" + cs +
+                "\" SIZE=\"80\" VALUE=\"389\">" +
+                "</TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD><A CLASS=\"" + Constants.STYLE_FORM_CAPTION +
+                "\">Security Method</A></TD>" + EOL);
+        htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+        htmlBody.append("    <TD><SELECT NAME=\"comp_security_" + cs + "\">" +
+                "<OPTION>None</OPTION><OPTION>SSL</OPTION>" +
+                "<OPTION>StartTLS</OPTION></SELECT></TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD><A CLASS=\"" + Constants.STYLE_FORM_CAPTION +
+                "\">Bind DN</A></TD>" + EOL);
+        htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+        htmlBody.append("    <TD><INPUT TYPE=\"TEXT\" NAME=\"comp_binddn_" +
+                cs + "\" SIZE=\"80\"></TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+
+        htmlBody.append("  <TR>" + EOL);
+        htmlBody.append("    <TD><A CLASS=\"" + Constants.STYLE_FORM_CAPTION +
+                "\">Bind Password</A></TD>" + EOL);
+        htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
+        htmlBody.append("    <TD><INPUT TYPE=\"PASSWORD\" NAME=\"comp_bindpw_" +
+                cs + "\" SIZE=\"80\"></TD>" + EOL);
+        htmlBody.append("  </TR>" + EOL);
+      }
+
+      htmlBody.append("</TABLE>" + EOL);
+      htmlBody.append("<TABLE BORDER=\"0\" WIDTH=\"100%\">" + EOL);
+    }
+
     // The "Test Job Parameters" and "Schedule Job" buttons
     htmlBody.append("  <TR>" + EOL);
     htmlBody.append("    <TD>&nbsp;</TD>" + EOL);
@@ -8310,6 +8811,225 @@ public final class AdminJob
       {
         try
         {
+          // --- Comparison mode handling ---
+          boolean comparisonEnabled = false;
+          String compEnabledStr = request.getParameter("comparison_enabled");
+          if (compEnabledStr != null &&
+                  (compEnabledStr.equalsIgnoreCase("true") ||
+                          compEnabledStr.equalsIgnoreCase("on")))
+          {
+            comparisonEnabled = true;
+          }
+
+          if (comparisonEnabled && "LDAP".equals(jobClass.getJobCategoryName()))
+          {
+            String compGroup = UUID.randomUUID().toString();
+            String prevJobID = null;
+
+            // Job 1: original server (from main form)
+            {
+              Date jobStartTime = (startTime != null) ? startTime : new Date();
+              Date jobStopTime = null;
+              if (stopTime != null)
+              {
+                long dur = stopTime.getTime() - jobStartTime.getTime();
+                jobStopTime = new Date(jobStartTime.getTime() + dur);
+              }
+
+              Job job1 = new Job(slamdServer, jobClass.getClass().getName(),
+                      numClients, threadsPerClient, threadStartupDelay,
+                      jobStartTime, jobStopTime, duration,
+                      collectionInterval, parameters,
+                      displayInReadOnlyMode);
+              job1.setFolderName(folderName);
+              // job description setting
+              String baseProduct = null;
+              for (Parameter p : parameters.getParameters())
+              {
+                if (p.getName().equals("product_name"))
+                {
+                  baseProduct = p.getValueString();
+                  break;
+                }
+              }
+              if (baseProduct != null && !baseProduct.trim().isEmpty())
+              {
+               job1.setJobDescription(
+                       jobDescription + " [" + baseProduct.trim() + "]");
+              }
+              else
+              {
+                job1.setJobDescription(jobDescription);
+              }
+
+              job1.setWaitForClients(waitForClients);
+              job1.setRequestedClients(requestedClients);
+              job1.setResourceMonitorClients(monitorClients);
+              job1.setMonitorClientsIfAvailable(monitorClientsIfAvailable);
+              job1.setNotifyAddresses(notifyAddresses);
+              job1.setJobComments(jobComments);
+              if (jobDisabled)
+              {
+                job1.setJobState(Constants.JOB_STATE_DISABLED);
+              }
+
+              prevJobID = scheduler.scheduleJob(job1, folderName);
+              infoMessage.append("Successfully scheduled comparison job " +
+                      prevJobID + " for execution.<BR>" + EOL);
+              HttpServletResponse response = requestInfo.response;
+              response.addHeader(Constants.SERVLET_PARAM_JOB_ID, prevJobID);
+            }
+
+            // Job 2~4: comparison servers
+            for (int cs = 2; cs <= 4; cs++)
+            {
+              String compProduct =
+                  request.getParameter(
+                      "comp_product_" + cs);
+              String compAddress =
+                  request.getParameter(
+                      "comp_address_" + cs);
+              if (compProduct == null ||
+                  compProduct.trim().isEmpty() ||
+                  compAddress == null ||
+                  compAddress.trim().isEmpty())
+              {
+                continue;
+              }
+
+              String compPort =
+                  request.getParameter(
+                      "comp_port_" + cs);
+              String compSecurity =
+                  request.getParameter(
+                      "comp_security_" + cs);
+              String compBindDN =
+                  request.getParameter(
+                      "comp_binddn_" + cs);
+              String compBindPW =
+                  request.getParameter(
+                      "comp_bindpw_" + cs);
+
+              // Clone parameters and replace
+              Parameter[] clonedParams =
+                  parameters.clone().getParameters();
+              for (Parameter p : clonedParams)
+              {
+                String pName = p.getName();
+                if (pName.equals("product_name"))
+                {
+                  p.setValueFromString(
+                      compProduct.trim());
+                }
+                else if (pName.equals("address"))
+                {
+                  p.setValueFromString(
+                      compAddress.trim());
+                }
+                else if (pName.equals("addresses"))
+                {
+                  if (compPort != null &&
+                      !compPort.trim().isEmpty())
+                  {
+                    p.setValueFromString(
+                        compAddress.trim() + ":" +
+                        compPort.trim());
+                  }
+                  else
+                  {
+                    p.setValueFromString(
+                        compAddress.trim());
+                  }
+                }
+                else if (pName.equals("port"))
+                {
+                  if (compPort != null &&
+                      !compPort.trim().isEmpty())
+                  {
+                    p.setValueFromString(
+                        compPort.trim());
+                  }
+                }
+                else if (pName.equals(
+                    "security_method") ||
+                    pName.equals("securityMethod"))
+                {
+                  if (compSecurity != null &&
+                      !compSecurity.trim().isEmpty())
+                  {
+                    p.setValueFromString(
+                        compSecurity.trim());
+                  }
+                }
+                else if (pName.equals("bind_dn") ||
+                    pName.equals("bindDN"))
+                {
+                  if (compBindDN != null &&
+                      !compBindDN.trim().isEmpty())
+                  {
+                    p.setValueFromString(
+                        compBindDN.trim());
+                  }
+                }
+                else if (pName.equals(
+                    "bind_password") ||
+                    pName.equals("bindPW"))
+                {
+                  if (compBindPW != null &&
+                      !compBindPW.trim().isEmpty())
+                  {
+                    p.setValueFromString(
+                        compBindPW.trim());
+                  }
+                }
+              }
+              ParameterList compParams = new ParameterList(clonedParams);
+
+              Date jobStartTime = (startTime != null) ? startTime : new Date();
+              Date jobStopTime = null;
+              if (stopTime != null)
+              {
+                long dur = stopTime.getTime() - jobStartTime.getTime();
+                jobStopTime = new Date(jobStartTime.getTime() + dur);
+              }
+
+              Job compJob = new Job(slamdServer, jobClass.getClass().getName(),
+                      numClients, threadsPerClient,
+                      threadStartupDelay,
+                      jobStartTime, jobStopTime, duration,
+                      collectionInterval, compParams,
+                      displayInReadOnlyMode);
+              compJob.setFolderName(folderName);
+              compJob.setJobDescription
+                      (jobDescription + " [" + compProduct + "]");
+              compJob.setWaitForClients(waitForClients);
+              compJob.setRequestedClients(requestedClients);
+              compJob.setResourceMonitorClients(monitorClients);
+              compJob.setMonitorClientsIfAvailable(monitorClientsIfAvailable);
+              compJob.setNotifyAddresses(notifyAddresses);
+              compJob.setJobComments(jobComments);
+              if (jobDisabled)
+              {
+                compJob.setJobState(Constants.JOB_STATE_DISABLED);
+              }
+              // Make interdependent (sequential execution)
+              compJob.setDependencies(new String[] { prevJobID });
+
+              prevJobID = scheduler.scheduleJob(compJob, folderName);
+              infoMessage.append("Successfully scheduled comparison job " +
+                      prevJobID + " (" + compProduct +
+                      ") for execution.<BR>" + EOL);
+              HttpServletResponse response = requestInfo.response;
+              response.addHeader(Constants.SERVLET_PARAM_JOB_ID, prevJobID);
+            }
+
+            handleViewJob(requestInfo,
+                    Constants.SERVLET_SECTION_JOB_VIEW_PENDING, null,
+                    null);
+            return;
+          }
+          // --- End comparison mode ---
+
           long thisStartTime = System.currentTimeMillis();
           if (startTime != null)
           {

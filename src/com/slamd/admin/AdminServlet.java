@@ -957,6 +957,8 @@ public class AdminServlet
   public void doPost(HttpServletRequest request, HttpServletResponse response)
          throws IOException
   {
+    request.setCharacterEncoding("UTF-8");
+
     // First, create the request info variable.
     RequestInfo requestInfo = new RequestInfo(request, response);
     requestInfo.requestID = getNextID();
@@ -1202,6 +1204,11 @@ public class AdminServlet
           else if (subsection.equals(Constants.SERVLET_SECTION_JOB_SAVE_STATS))
           {
             handleSaveJobStatistics(requestInfo);
+          }
+          else if (subsection.equals(
+                        Constants.SERVLET_SECTION_JOB_EXPORT_CSV))
+          {
+            handleExportSummaryCSV(requestInfo);
           }
           else if (subsection.equals(Constants.SERVLET_SECTION_JOB_VIEW_GRAPH))
           {
@@ -9324,6 +9331,10 @@ public class AdminServlet
       else if (subsection.equals(Constants.SERVLET_SECTION_JOB_SAVE_STATS))
       {
         pageTitle = "Save Job Statistics - " + pageTitle;
+      }
+      else if (subsection.equals(Constants.SERVLET_SECTION_JOB_EXPORT_CSV))
+      {
+        pageTitle = "Export Summary CSV - " + pageTitle;
       }
       else if (subsection.equals(Constants.SERVLET_SECTION_JOB_VIEW_GRAPH) ||
                subsection.equals(Constants.SERVLET_SECTION_JOB_GRAPH) ||
