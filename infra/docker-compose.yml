@@ -26,6 +26,37 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
 
+  slamd-server:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: server
+    container_name: slamd-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "3000:3000"
+      - "3001:3001"
+      - "3003:3003"
+    depends_on:
+      - postgres
+    volumes:
+      - slamd_config_db:/opt/slamd/webapps/slamd/WEB-INF/db
+    environment:
+      JAVA_OPTS: >-
+        -server -Xms512m -Xmx512m
+        -Djava.awt.headless=true
+
+  slamd-client:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: client
+    restart: unless-stopped
+    depends_on:
+      - slamd-server
+
 volumes:
   postgres_data:
   grafana_data:
+  slamd_config_db:
