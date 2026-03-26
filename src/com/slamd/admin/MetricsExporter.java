@@ -40,6 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.LinkedHashMap;
+import java.security.MessageDigest;
+import java.util.Set;
+import java.util.TreeMap;
 
 
 
@@ -73,6 +76,18 @@ public final class MetricsExporter
           "bind",   "Binds",
           "modify", "Modifies");
 
+  private static final Set<String> CONFIG_EXCLUDED_DISPLAY_NAMES =
+          Set.of(
+                  "Product Name",
+                  "Server Addresses and Ports",
+                  "Directory Server Address",
+                  "Directory Server Port",
+                  "Bind DN",
+                  "Bind Password",
+                  "Search User Bind DN",
+                  "Search User Bind Password",
+                  "Warm-Up Duration",
+                  "Cool-Down Duration");
 
   private static final String SQL_UPSERT_RUN =
           "INSERT INTO slamd_run " +
@@ -121,10 +136,12 @@ public final class MetricsExporter
 
   private static final String SQL_UPSERT_JOB_PARAMS =
           "INSERT INTO slamd_job_params " +
-                  "(job_id, params) " +
-                  "VALUES (?, CAST(? AS JSONB)) " +
+                  "(job_id, params, config_hash, config_label) " +
+                  "VALUES (?, CAST(? AS JSONB), ?, ?) " +
                   "ON CONFLICT (job_id) DO UPDATE SET " +
-                  "  params = CAST(EXCLUDED.params AS JSONB)";
+                  "  params = CAST(EXCLUDED.params AS JSONB), " +
+                  "  config_hash = EXCLUDED.config_hash, " +
+                  "  config_label = EXCLUDED.config_label";
 
   private static final String SQL_UPSERT_INTERVAL =
           "INSERT INTO slamd_op_interval " +
@@ -656,13 +673,103 @@ public final class MetricsExporter
       throws Exception
   {
     String json = buildParamsJson(job);
+    String[] hashAndLabel = buildConfigHashAndLabel(job);
 
     try(PreparedStatement ps = conn.prepareStatement(SQL_UPSERT_JOB_PARAMS)) {
       ps.setString(1, job.getJobID());
       ps.setString(2, json);
+      ps.setString(3, hashAndLabel[0]);
+      ps.setString(4, hashAndLabel[1]);
       ps.executeUpdate();
     }
   }
+
+  /**
+   * Builds a config hash and label from the job's performance
+   * parameters, excluding server-specific fields.  The hash is
+   * computed from the full parameter values so that different
+   * products tested with the same settings share the same hash.
+   * The label truncates values to 50 characters for display in
+   * the Grafana dropdown.
+   *
+   * @param  job  The job whose parameters to hash.
+   *
+   * @return  A two-element array: [config_hash, config_label].
+   */
+  private static String[] buildConfigHashAndLabel(Job job) {
+    TreeMap<String, String> configParams = new TreeMap<>();
+
+    Parameter[] stubs = job.getParameterStubs().clone().getParameters();
+    for (Parameter stub : stubs)
+    {
+      Parameter p = job.getParameterList().getParameter(stub.getName());
+      if (p == null
+        || p instanceof PlaceholderParameter
+        || p instanceof LabelParameter
+        || p.isSensitive())
+      {
+        continue;
+      }
+
+      String displayName = stub.getDisplayName();
+      if (CONFIG_EXCLUDED_DISPLAY_NAMES.contains(displayName)) {
+        continue;
+      }
+
+      String value = p.getValueString();
+      configParams.put(displayName, value != null ? value : "");
+    }
+
+    StringBuilder hashInput = new StringBuilder();
+    StringBuilder labelInput = new StringBuilder();
+
+    for (Map.Entry<String, String> entry : configParams.entrySet())
+    {
+      if (hashInput.length() > 0)
+      {
+        hashInput.append(", ");
+        labelInput.append(", ");
+      }
+      hashInput.append(entry.getKey()).append("=").append(entry.getValue());
+      String truncated = entry.getValue().length() > 50
+              ? entry.getValue().substring(0, 50)
+              : entry.getValue();
+      labelInput.append(entry.getKey()).append("=").append(truncated);
+    }
+
+    String configHash = md5Hex(hashInput.toString());
+    String configLabel = labelInput.toString();
+
+    return new String[]{ configHash, configLabel };
+  }
+
+  /**
+   * Computes the MD5 hex digest of the given string.
+   *
+   * @param  input  The input string to hash.
+   *
+   * @return  The 32-character lowercase hex MD5 hash.
+   */
+  private static String md5Hex(String input)
+  {
+    try
+    {
+      MessageDigest md = MessageDigest.getInstance("MD5");
+      byte[] digest = md.digest(input.getBytes("UTF-8"));
+      StringBuilder sb = new StringBuilder();
+      for (byte b : digest)
+      {
+        sb.append(String.format("%02x", b & 0xff));
+      }
+      return sb.toString();
+    }
+    catch (Exception e)
+    {
+      throw new RuntimeException("MD5 computation failed", e);
+    }
+  }
+
+
 
   /**
    * Builds a JSON string of the job's schedule and parameters.
