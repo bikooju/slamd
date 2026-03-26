@@ -137,7 +137,7 @@ public final class BasicSearchAndBindRateJob
 
   // The parameter used to specify the directory server port.
   private IntegerParameter serverPortParameter = new IntegerParameter(
-       "port", "Directory Serve Port",
+       "port", "Directory Server Port",
        "The port number of the directory server to search.", true, 389, true, 1,
        true, 65535);
 
