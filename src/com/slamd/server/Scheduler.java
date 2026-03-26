@@ -43,6 +43,8 @@ import com.slamd.parameter.IntegerParameter;
 import com.slamd.parameter.Parameter;
 import com.slamd.parameter.ParameterList;
 
+import com.slamd.admin.MetricsExporter;
+
 
 
 /**
@@ -995,6 +997,19 @@ public final class Scheduler
 
     // See if anyone should be notified that the job is complete.
     slamdServer.sendCompletedJobNotification(job);
+
+    // Auto-export metrics to database.
+    try {
+      MetricsExporter.export(job);
+    }
+    catch (final Exception e)
+    {
+      slamdServer.logMessage(
+              Constants.LOG_LEVEL_ANY,
+              "Failed to export metrics for "
+              + "job " + job.getJobID()
+              + ": " + e.getMessage());
+    }
 
 
     // See if this job is associated with an optimizing job.  If so, then
