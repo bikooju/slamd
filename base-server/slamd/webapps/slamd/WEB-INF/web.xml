@@ -63,6 +63,16 @@
     <url-pattern>/</url-pattern>
   </servlet-mapping>
 
+  <servlet>
+    <servlet-name>api</servlet-name>
+    <servlet-class>com.slamd.admin.ApiServlet</servlet-class>
+  </servlet>
+
+  <servlet-mapping>
+    <servlet-name>api</servlet-name>
+    <url-pattern>/api/*</url-pattern>
+  </servlet-mapping>
+
   <!-- Uncomment this section if you want to enable the getfile servlet,
        which makes it possible to use the same name to access multiple files.
        This is useful for jobs that accept a file URL argument but each
