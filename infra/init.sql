@@ -51,5 +51,7 @@ CREATE TABLE IF NOT EXISTS slamd_op_bucket (
 CREATE TABLE IF NOT EXISTS slamd_job_params (
     job_id              TEXT PRIMARY KEY,
     params              JSONB NOT NULL,
+    config_hash         TEXT,
+    config_label        TEXT,
     FOREIGN KEY (job_id) REFERENCES slamd_run(job_id) ON DELETE CASCADE
 );
