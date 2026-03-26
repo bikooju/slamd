@@ -1,0 +1,13 @@
+build/
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.git/
+.gitignore
+*.md
+*.csv
+infra/grafana/
+infra/init.sql
