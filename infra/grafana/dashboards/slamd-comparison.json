@@ -34,6 +34,18 @@
         "sort": 3
       },
       {
+        "name": "test_config",
+        "type": "query",
+        "label": "성능 측정 설정",
+        "datasource": { "type": "postgres", "uid": "slamd-postgres" },
+        "query": "SELECT config_label || ' (' || to_char(start_date, 'YYYY-MM-DD') || ')' AS __text, config_hash || '__' || to_char(start_date, 'YYYY-MM-DD') AS __value FROM (SELECT jp.config_label, jp.config_hash, r.start_time::date AS start_date FROM slamd_job_params jp JOIN slamd_run r ON jp.job_id = r.job_id JOIN slamd_op_summary s ON r.job_id = s.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND jp.config_hash IS NOT NULL GROUP BY jp.config_hash, jp.config_label, r.start_time::date) sub ORDER BY start_date DESC, config_label",
+        "current": {},
+        "includeAll": false,
+        "multi": false,
+        "refresh": 2,
+        "sort": 0
+      },
+      {
         "name": "y_scale",
         "type": "custom",
         "label": "Y축",
@@ -66,7 +78,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT seconds, product_name, ops FROM (SELECT (n.ord - 1) * i.collection_interval AS seconds, r.product_name, ROUND(n.ops::numeric) AS ops FROM slamd_op_interval i JOIN slamd_run r ON i.job_id = r.job_id, unnest(i.ops_per_sec) WITH ORDINALITY AS n(ops, ord) WHERE i.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) UNION ALL SELECT 0, '__base__', 0 WHERE '${y_scale}' = '전체') t ORDER BY product_name, seconds",
+          "rawSql": "SELECT seconds, product_name, ops FROM (SELECT (n.ord - 1) * i.collection_interval AS seconds, r.product_name, ROUND(n.ops::numeric) AS ops FROM slamd_op_interval i JOIN slamd_run r ON i.job_id = r.job_id JOIN slamd_job_params jp ON r.job_id = jp.job_id, unnest(i.ops_per_sec) WITH ORDINALITY AS n(ops, ord) WHERE i.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) AND jp.config_hash = split_part('${test_config}', '__', 1) AND r.start_time::date = split_part('${test_config}', '__', 2)::date UNION ALL SELECT 0, '__base__', 0 WHERE '${y_scale}' = '전체') t ORDER BY product_name, seconds",
           "format": "table"
         }
       ],
@@ -144,7 +156,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT r.product_name AS \"Product\", r.thread_count AS \"Threads\", r.job_id AS \"Job ID\", ROUND(s.tps::numeric, 2) AS \"Avg TPS\", ROUND(s.avg_latency_ms::numeric, 3) AS \"Avg Latency (ms)\", s.total_count AS \"Total Count\", ROUND((s.success_rate * 100)::numeric, 2) AS \"Success %\", r.duration_seconds AS \"Duration (s)\" FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) ORDER BY r.product_name",
+          "rawSql": "SELECT r.product_name AS \"Product\", r.thread_count AS \"Threads\", r.job_id AS \"Job ID\", ROUND(s.tps::numeric, 2) AS \"Avg TPS\", ROUND(s.avg_latency_ms::numeric, 3) AS \"Avg Latency (ms)\", s.total_count AS \"Total Count\", ROUND((s.success_rate * 100)::numeric, 2) AS \"Success %\", r.duration_seconds AS \"Duration (s)\" FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id JOIN slamd_job_params jp ON r.job_id = jp.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) AND jp.config_hash = split_part('${test_config}', '__', 1) AND r.start_time::date = split_part('${test_config}', '__', 2)::date ORDER BY r.product_name",
           "format": "table"
         }
       ],
@@ -177,7 +189,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT r.product_name AS \"Product\", ROUND(s.tps::numeric, 2) AS \"TPS\", s.op_type, r.job_type, r.job_description, r.current_state, to_char(r.start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time, to_char(r.stop_time, 'YYYY-MM-DD HH24:MI:SS') AS stop_time, r.duration_seconds FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) ORDER BY r.product_name",
+          "rawSql": "SELECT r.product_name AS \"Product\", ROUND(s.tps::numeric, 2) AS \"TPS\", s.op_type, r.job_type, r.job_description, r.current_state, to_char(r.start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time, to_char(r.stop_time, 'YYYY-MM-DD HH24:MI:SS') AS stop_time, r.duration_seconds FROM slamd_run r JOIN slamd_op_summary s ON r.job_id = s.job_id JOIN slamd_job_params jp ON r.job_id = jp.job_id WHERE s.op_type = '${op_type}' AND r.thread_count = ${thread_count} AND r.product_name IN (${product:singlequote}) AND jp.config_hash = split_part('${test_config}', '__', 1) AND r.start_time::date = split_part('${test_config}', '__', 2)::date ORDER BY r.product_name",
           "format": "table"
         }
       ],
