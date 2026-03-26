@@ -10,7 +10,7 @@ datasources:
     type: postgres
     orgId: 1
     access: proxy
-    url: postgres:5432
+    url: slamd-postgres:5432
     database: slamd_metrics
     user: slamd
     secureJsonData:
