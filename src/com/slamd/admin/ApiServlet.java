@@ -217,7 +217,10 @@ public class ApiServlet extends HttpServlet {
                     + "r.job_description, "
                     + "r.current_state, r.start_time, "
                     + "r.stop_time, "
-                    + "r.duration_seconds, r.product_name, "
+                    + "r.duration_seconds, "
+                    + "r.product_name, "
+                    + "r.num_clients, "
+                    + "r.threads_per_client, "
                     + "r.thread_count "
                     + "FROM slamd_run r");
 
@@ -267,6 +270,10 @@ public class ApiServlet extends HttpServlet {
                 rs.getString("current_state"));
         run.addProperty("productName",
                 rs.getString("product_name"));
+        run.addProperty("numClients",
+                rs.getInt("num_clients"));
+        run.addProperty("threadsPerClient",
+                rs.getInt("threads_per_client"));
         run.addProperty("threadCount",
                 rs.getInt("thread_count"));
         run.addProperty("durationSeconds",
@@ -535,6 +542,8 @@ public class ApiServlet extends HttpServlet {
 
     String sql =
             "SELECT r.job_id, r.product_name, "
+                    + "r.num_clients, "
+                    + "r.threads_per_client, "
                     + "r.thread_count, r.start_time, "
                     + "s.tps, s.avg_latency_ms, "
                     + "s.total_count, s.success_rate, "
@@ -570,6 +579,10 @@ public class ApiServlet extends HttpServlet {
                 rs.getString("job_id"));
         row.addProperty("productName",
                 rs.getString("product_name"));
+        row.addProperty("numClients",
+                rs.getInt("num_clients"));
+        row.addProperty("threadsPerClient",
+                rs.getInt("threads_per_client"));
         row.addProperty("threadCount",
                 rs.getInt("thread_count"));
         row.addProperty("tps",

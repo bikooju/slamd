@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS slamd_run (
     stop_time           TIMESTAMP,
     duration_seconds    INT,
     product_name        TEXT,
-    thread_count        INT,
-    comparison_group    TEXT
+    num_clients         INT,
+    threads_per_client  INT,
+    thread_count        INT
 );
 
 CREATE TABLE IF NOT EXISTS slamd_op_summary (

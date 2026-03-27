@@ -90,24 +90,26 @@ public final class MetricsExporter
                   "Cool-Down Duration");
 
   private static final String SQL_UPSERT_RUN =
-          "INSERT INTO slamd_run " +
-                  "(job_id, job_type, job_description, " +
-                  " job_class, current_state, " +
-                  " start_time, stop_time, " +
-                  " duration_seconds, " +
-                  " product_name, thread_count, comparison_group) " +
-                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-                  "ON CONFLICT (job_id) DO UPDATE SET " +
-                  "  job_type          = EXCLUDED.job_type, " +
-                  "  job_description   = EXCLUDED.job_description, " +
-                  "  job_class         = EXCLUDED.job_class, " +
-                  "  current_state     = EXCLUDED.current_state, " +
-                  "  start_time        = EXCLUDED.start_time, " +
-                  "  stop_time         = EXCLUDED.stop_time, " +
-                  "  duration_seconds  = EXCLUDED.duration_seconds, " +
-                  "  product_name      = EXCLUDED.product_name, " +
-                  "  thread_count      = EXCLUDED.thread_count, " +
-                  "  comparison_group  = EXCLUDED.comparison_group";
+      "INSERT INTO slamd_run "
+      + "(job_id, job_type, job_description, "
+      + " job_class, current_state, "
+      + " start_time, stop_time, "
+      + " duration_seconds, product_name, "
+      + " num_clients, threads_per_client, "
+      + " thread_count) "
+      + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+      + "ON CONFLICT (job_id) DO UPDATE SET "
+      + "  job_type           = EXCLUDED.job_type, "
+      + "  job_description    = EXCLUDED.job_description, "
+      + "  job_class          = EXCLUDED.job_class, "
+      + "  current_state      = EXCLUDED.current_state, "
+      + "  start_time         = EXCLUDED.start_time, "
+      + "  stop_time          = EXCLUDED.stop_time, "
+      + "  duration_seconds   = EXCLUDED.duration_seconds, "
+      + "  product_name       = EXCLUDED.product_name, "
+      + "  num_clients        = EXCLUDED.num_clients, "
+      + "  threads_per_client = EXCLUDED.threads_per_client, "
+      + "  thread_count       = EXCLUDED.thread_count";
 
   private static final String SQL_UPSERT_OP_SUMMARY =
       "INSERT INTO slamd_op_summary " +
@@ -502,12 +504,16 @@ public final class MetricsExporter
         ps.setNull(9, java.sql.Types.VARCHAR);
       }
 
-      // thread_count = numClients * threadsPerClient
-      ps.setInt(10,
-              job.getNumberOfClients() * job.getThreadsPerClient());
+      // num_clients
+      ps.setInt(10, job.getNumberOfClients());
 
-      // comparison_group (currently not setting - set null)
-      ps.setNull(11, java.sql.Types.VARCHAR);
+      // threads_per_client
+      ps.setInt(11, job.getThreadsPerClient());
+
+      // thread_count = numClients * threadsPerClient
+      ps.setInt(12,
+          job.getNumberOfClients()
+              * job.getThreadsPerClient());
 
       ps.executeUpdate();
     }
